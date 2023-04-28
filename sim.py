@@ -38,8 +38,8 @@ murderousAggression         = 1.25  # Aggression level at which chickens will ki
 Food levers, control your population through starvation. The Great Cluck Forwards!
 ##################################################################################################"""
 startingFood                = 0.50  # Percentage of the maximum food that a nest starts with
-foodGain                    = 0.10  # Percentage of the maximum food that a nest gets back at the
-                                    # each cycle (after starvation checks and other stuff)
+foodGain                    = 0.50  # Percentage of the maximum food that a nest gets back at the
+                                    # start of each cycle (after starvation checks and other stuff)
 foodPerRooster              = 2     # Food consumed by roosters each cycle
 foodPerHen                  = 1     # Food consumed by hens each cycle
 
@@ -182,10 +182,29 @@ class Nest():
         # totalArr = [len(self.roosters) +len(self.hens)]
         newRoosters = []
         newHens  = [] 
+        
+        # Make the chickens eat
+        self.curFood -= (len(self.roosters) * foodPerRooster + len(self.hens) * foodPerHen)
+        
+        # Check if chickens are suffering from starvation
+        if (self.curFood < 0):
+            # Percentage chance to die gets higher as food shortage grows
+            chanceToStarve = (float(self.curFood) * -1.00)/float(self.maxFood)
+            for r in self.roosters:
+                if random.random() < chanceToStarve:
+                    r.alive = 0
+            for h in self.hens:
+                if random.random() < chanceToStarve:
+                    h.alive = 0
 
-        # Kill the old ones
-        self.roosters = [r for r in self.roosters if r.age < maxAge]
-        self.hens  = [h for h in self.hens  if h.age < maxAge]
+        # Increase food for the next cycle (so I don't forget)
+        self.curFood += self.maxFood * foodGain
+        if self.curFood > self.maxFood:
+            self.curFood == self.maxFood
+
+        # Kill the old ones and remove the dead ones
+        self.roosters = [r for r in self.roosters if (r.age < maxAge and r.alive == 1)]
+        self.hens  = [h for h in self.hens if (h.age < maxAge and h.alive == 1)]
 
         # Aggression and speed determine the fitness of each rooster to procreate.
         # How much they impact fitness is determined by globals at the top of the file.
@@ -285,6 +304,7 @@ class Nest():
             len(self.roosters)
             , len(self.hens)
         )
+
    
 
 
@@ -294,7 +314,7 @@ if __name__ == "__main__":
     #     , "KFC": Nest("KFC", 20)
     #     , ""
     # }
-    nest = Nest("BBQ", 20)
+    nest = Nest("BBQ", 500, 20)
     nest.createRoad("KFC", 0.20)
     nest.createRoad("Popeye's", 0.40)
     nest.createRoad("Wendy's", 0.30)
