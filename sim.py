@@ -54,12 +54,14 @@ aggressionWeight            = 0.50  # Percentage of aggression that is factored 
 # Information need to graph data, each cycle a nest updates this information.
 class GraphData():
     def __init__(self, rPop, hPop, nFood, cFood):
-        self.rData      = [rPop]                     # Rooster population
-        self.hData      = [hPop]                     # Hen population
-        self.tData      = [rPop + hPop]              # Total population
-        self.nFood      = [nFood]                    # Needed food
-        self.cFood      = [cFood]                    # Current food
-    
+        self.rData      = [rPop]                    # Rooster population
+        self.hData      = [hPop]                    # Hen population
+        self.tData      = [rPop + hPop]             # Total population
+        self.nFood      = [nFood]                   # Needed food
+        self.cFood      = [cFood]                   # Current food
+        self.agAve      = [startingAggression]      # Nests average aggression
+        self.spAve      = [startingSpeed]           # Nests average speed
+
     def updatePopulationData(self, rPop, hPop):
         self.rData.append(rPop)
         self.hData.append(hPop)
@@ -68,6 +70,10 @@ class GraphData():
     def updateFoodData(self, nFood, cFood):
         self.nFood.append(nFood)
         self.cFood.append(cFood)
+
+    def updateFitnessAverages(self, aggr, spd):
+        self.agAve.append(aggr)
+        self.spAve.append(spd)
 
     def graphPopulationData(self, prefix):
         x = list(range(0, cycles + 1))
@@ -128,6 +134,29 @@ class Nest():
     def getTravelers(self):
         return self.travelers
     
+    def storeFitnessAverages(self):
+        aggr = 0.00
+        spd  = 0.00
+        
+        for r in self.roosters:
+            aggr += r.aggression
+            spd  += r.speed
+
+        for h in self.hens:
+            aggr += h.aggression
+            spd  += h.speed 
+
+        popCount = len(self.roosters) + len(self.hens)
+        # Divide by 0 error avoidance when nest population is 0.
+        if popCount > 0:
+            self.data.updateFitnessAverages(
+                aggr / popCount
+                ,spd / popCount
+            )
+        else:
+            self.data.updateFitnessAverages(0, 0)
+
+
     """
     In order to reduce runtime, we need to reduce the number of times the array is iterated. To do that we're
     using slices and pops to decide who is crossing, who isn't, and what road they're crossing.
@@ -189,13 +218,14 @@ class Nest():
                     )
             else:
                 stayingList.append(chicken)
-
+        
+        # Add back the chickens that decided to stay
         if (gender == 'male'):
             self.roosters += stayingList
         else:
             self.hens += stayingList
-
-        # self.clearTravelers() # TODO: Remove after debugging
+        
+        
     
     """
     Simulates one nest cycle. This includes:
@@ -338,12 +368,14 @@ class Nest():
         self.roosters += newRoosters
         self.hens     += newHens
 
+        # Update the population data for graphing
         self.data.updatePopulationData(
             len(self.roosters)
             , len(self.hens)
         )
 
-   
+        # Store aggression and speed averages for the cycle for graphing         
+        self.storeFitnessAverages()
 
 
 if __name__ == "__main__":
@@ -411,9 +443,6 @@ if __name__ == "__main__":
         plt.plot(x, nests[nest]["nest"].data.hData, label=f"{nest} Hen")        
 
 
-    # plt.figure(1)
-    # nest.data.graphPopulationData("BBQ")
-    # nest.data.graphFoodData("BBQ")
     plt.legend()
     plt.show()
 
