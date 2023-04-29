@@ -31,8 +31,7 @@ maxAge                      = 7     # Age at which chickens die of natural cause
 henFertileAge               = 4     # Age at which hens stop producing eggs. They are still 
                                     # factored into breeding systems, but do not lay fertilized eggs
 hensImpregnatedPerRooster   = 2     # Number of hens that a rooster can impregnate in a single cycle
-murderousAggression         = 1.25  # Aggression level at which chickens will kill other chickens.
-                                    # Note a chicken can get itself killed.
+
 
 """##################################################################################################
 Food levers, control your population through starvation. The Great Cluck Forwards!
@@ -44,12 +43,37 @@ foodPerRooster              = 2     # Food consumed by roosters each cycle
 foodPerHen                  = 1     # Food consumed by hens each cycle
 roosterStarveModifier       = 0.50  # Modifies the chance a rooster will starve, chance * modifier
 henStarveModifier           = 1.00  # Modifies the chance a hen will starve, chance * modifier
+maxFoodIncrease             = 0.01  # The amount that a nest's maximum food is increased when
+                                    # chickens don't eat all available food
+maxFoodDecrease             = 0.10  # Percentage that a nest's maximum food is decreased when
+                                    # chickens don't eat all available food
+feastAggressionChange       = 0.005 # When there is enough food for all pops to eat, decrease a 
+                                    # chickens aggression by this value due to a lack of competition.
+                                    # This value should be positive. aggression + (value * -1)
+famineAggressionChange      = 0.02  # When there is a food scarcity, increase aggression by this 
+                                    # amount due to the competition for resources
+                                    # This value should be positive, aggression + value
 
 """##################################################################################################
 Fitness levers, determines rooster breeding order
 ##################################################################################################"""
 speedWeight                 = 1.00  # Percentage of speed that is factored into breeding fitness
-aggressionWeight            = 0.50  # Percentage of aggression that is factored into breeding fitness
+aggressionWeight            = 0.50  # Percentage of aggression that is factored into breeding
+henBreedingAggression       = 0.005 # When a hen breeds, their aggression is increased by this amount
+roosterBreedingAggression   = 0.01  # When a rooster breads, their aggression is increased by this
+                                    # amount
+speedForRoadCrossing        = 0.01  # When a chicken crosses the road, their speed is increased by
+                                    # amount
+murderousAggression         = 0.50  # Average aggression level at which a nest will suffer from
+                                    # infighting. Infighting has a chance of killing off pops and
+                                    # lowers the overall aggression of each surviving bird to a 
+                                    # percentage of their current aggression.
+postMurderAggression        = 0.25  # Percentage that a surviving chickens aggression level is
+                                    # lowered to
+baseChanceToDieInCombat     = 0.50  # Base chance that any given chicken will die from a war of
+                                    # aggression. Formula for death chance is:
+                                    # baseChance - (speed * speedWeight)
+
 
 # Information need to graph data, each cycle a nest updates this information.
 class GraphData():
@@ -156,6 +180,11 @@ class Nest():
         else:
             self.data.updateFitnessAverages(0, 0)
 
+    def updatePopulationAggression(self, value):
+        for r in self.roosters:
+            r.aggression += value
+        for h in self.hens:
+            h.aggression += value
 
     """
     In order to reduce runtime, we need to reduce the number of times the array is iterated. To do that we're
@@ -206,7 +235,7 @@ class Nest():
                 
                 # Does the chicken die?
                 if random.random() > self.roads[roadInd]["danger"] - chicken.speed: # Faster chicken, less death
-                    chicken.speed += 0.01       # Increase the speed because of experience
+                    chicken.speed += speedForRoadCrossing       # Increase the speed because of experience
 
                     # Add to the traveler list, at the end of the cycle map controller will take the lists and 
                     # move chickens to where they belong.
@@ -225,8 +254,44 @@ class Nest():
         else:
             self.hens += stayingList
         
+    def WarOfAggression(self):
+        # If the total population of a nest is 0, return from function
+        popCount = len(self.roosters) + len(self.hens)
+        if popCount == 0:   # If theres not population, return
+            return
         
+        # Determine the average aggression level of a nest
+        aggr = 0.00
+        
+        for r in self.roosters:
+            aggr += r.aggression
+
+        for h in self.hens:
+            aggr += h.aggression
     
+        aggr /= popCount
+
+        # If the average aggression level is less than the level needed to spark an internal fight for resources,
+        # return from function
+        if aggr < murderousAggression:
+            return
+
+        # Otherwise, we have an all out chicken fight. Fitness level helps to determine
+        for r in self.roosters:
+            if random.random() < baseChanceToDieInCombat - (r.speed * speedWeight):
+                r.alive = 0
+            else:
+                r.aggression *= postMurderAggression
+        for h in self.hens:
+            if random.random() < baseChanceToDieInCombat - (h.speed * speedWeight):
+                h.alive = 0
+            else:
+                h.aggression *= postMurderAggression
+        
+        # Remove the honored fallen
+        self.roosters = [r for r in self.roosters if r.alive == 1]
+        self.hens  = [h for h in self.hens if h.alive == 0]
+
     """
     Simulates one nest cycle. This includes:
     Killing off old birds
@@ -237,6 +302,11 @@ class Nest():
         newRoosters = []
         newHens  = [] 
         
+        # Kill the old chickens
+        self.roosters = [r for r in self.roosters if (r.age < maxAge)]
+        self.hens  = [h for h in self.hens if (h.age < maxAge)]
+
+
         # Update the food data graph
         self.data.updateFoodData(
             len(self.roosters) * foodPerRooster + len(self.hens) * foodPerHen
@@ -254,6 +324,9 @@ class Nest():
         
         # Check if chickens are suffering from starvation
         if (self.curFood < 0):
+            # The chickens have eaten all the food, decreasing the total amount of food that will
+            # be available next cycle. 
+            self.maxFood += (self.maxFood * maxFoodDecrease)
             # Percentage chance to die gets higher as food shortage grows
             chanceToStarve = (float(self.curFood) * -1.00)/float(self.maxFood)
             for r in self.roosters:
@@ -262,15 +335,27 @@ class Nest():
             for h in self.hens:
                 if random.random() < chanceToStarve * henStarveModifier:
                     h.alive = 0
+            # Due to an increase in food
+            self.updatePopulationAggression(famineAggressionChange)
+        else:
+            # The chickens did not eat all the food, leading to a total increase in maximum food
+            # the next cycle. 
+            self.maxFood += (self.maxFood * maxFoodIncrease)
+            # Due to full bellies and little lack of competition for resources, decrease the chickens
+            # aggression level. 
+            self.updatePopulationAggression(feastAggressionChange * -1.00)
 
         # Increase food for the next cycle (so I don't forget)
         self.curFood += self.maxFood * foodGain
         if self.curFood > self.maxFood:
             self.curFood = self.maxFood
 
-        # Kill the old ones and remove the dead ones
-        self.roosters = [r for r in self.roosters if (r.age < maxAge and r.alive == 1)]
-        self.hens  = [h for h in self.hens if (h.age < maxAge and h.alive == 1)]
+        # Remove the dead chickens
+        self.roosters = [r for r in self.roosters if r.alive == 1]
+        self.hens  = [h for h in self.hens if h.alive == 1]
+
+        # Check for civil war.
+        self.WarOfAggression()
 
         # Aggression and speed determine the fitness of each rooster to procreate.
         # How much they impact fitness is determined by globals at the top of the file.
@@ -295,10 +380,8 @@ class Nest():
             # with, we get our breed on. If we've exceeded the hens nest, then break the baby
             # generation function.
             if (len(self.hens) > r * hensImpregnatedPerRooster):
-                # self.roosters[r].bred = 1               # Mark rooster as bred. If a hen or rooster
-                                                        # has bred in a cycle, it will not attempt to
-                                                        # cross the road
-                self.roosters[r].aggression += 0.01     # Breeding makes roosters more aggressive
+
+                self.roosters[r].aggression += roosterBreedingAggression # Breeding makes roosters more aggressive
                 
                 # Get the hen list starting index and ending index based on the number of hens
                 # a rooster can impregnate in a single cycle.
@@ -306,8 +389,7 @@ class Nest():
                     # While we haven't exceeded the number of hens, we'll continue to breed them.
                     # If the list ends in the middle of a breeding spree, break egg train
                     if h < len(self.hens):
-                        # self.hens[h].bred = 1           # Mark hen as bred.                                                             # 
-                        self.hens[h].aggression += 0.005# Increase aggression
+                        self.hens[h].aggression += henBreedingAggression # Increase aggression
                         
                         # As population control, I've given a maximum fertility age to hens. While
                         # they can no longer create chickens, these cougars can still take up valuable
@@ -363,6 +445,7 @@ class Nest():
             r.age += 1
         for h in self.hens:
             h.age += 1
+        
 
         # Increase the populations based on breeding results
         self.roosters += newRoosters
